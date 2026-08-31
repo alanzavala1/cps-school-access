@@ -1,0 +1,66 @@
+Chicago School Gap: hand-written clustering validation
+=======================================================
+Input: 77 community areas x 4 features
+Reference: scikit-learn 1.9.0
+Production cluster count: k=5
+
+1. Identical-start k-means and silhouette correctness
+Scope: sklearn receives the hand-written deterministic centroids with n_init=1.
+This validates assignment, centroid updates, and convergence from the same start;
+ARI=1.0 here does not evaluate whether the hand-written initialization is high quality.
+Silhouette comparison: both functions score the identical hand-written labels.
+
+k  ARI         inertia(hand)  inertia(sk)    ratio       silhouette(hand)  silhouette(sk)    abs delta    result
+-  ----------  -------------  -------------  ----------  ----------------  ----------------  -----------  ------
+3  1.00000000  81.79628391    81.79628391    1.00000000  0.2586507514      0.2586507514      2.220e-16    PASS
+4  1.00000000  68.98328611    68.98328611    1.00000000  0.2647207921      0.2647207921      1.665e-16    PASS
+5  1.00000000  58.58211706    58.58211706    1.00000000  0.2680664239      0.2680664239      1.665e-16    PASS
+6  1.00000000  53.28483159    53.28483159    1.00000000  0.2382734403      0.2382734403      0.000e+00    PASS
+7  1.00000000  49.05511463    49.05511463    1.00000000  0.2459832134      0.2459832134      5.551e-17    PASS
+
+2. Initialization quality: hand-written vs sklearn k-means++
+Seeds: 0,1,2,3,4,5,6,7,8,9; each sklearn run uses n_init=10.
+ARI compares hand-written labels with the lowest-inertia k-means++ partition and is descriptive only.
+
+k  inertia(hand)  k++ min        k++ median     k++ max        hand position              best seed  ARI(best)  silhouette(hand)  silhouette(best)
+-  -------------  -------------  -------------  -------------  -------------------------  ---------  ---------  ----------------  ----------------
+3  81.79628391    81.74758925    81.74758925    81.74758925    above max (suboptimal)     0          0.930639   0.2586507514      0.2625918609
+4  68.98328611    68.98328611    69.30893504    70.20537565    at/below min (excellent)   2          1.000000   0.2647207921      0.2647207921
+5  58.58211706    57.23779203    57.69503387    59.29079420    inside range (fine)        5          0.719901   0.2680664239      0.2812226030
+6  53.28483159    49.93649350    50.11136802    50.40152097    above max (suboptimal)     9          0.512872   0.2382734403      0.2929472797
+7  49.05511463    44.64726939    44.84910679    45.09621170    above max (suboptimal)     1          0.545406   0.2459832134      0.2647807216
+
+Per-seed inertia (seed:value; each value is the best of 10 k-means++ starts):
+k=3: 0:81.74758925, 1:81.74758925, 2:81.74758925, 3:81.74758925, 4:81.74758925, 5:81.74758925, 6:81.74758925, 7:81.74758925, 8:81.74758925, 9:81.74758925
+k=4: 0:69.01487853, 1:70.20537565, 2:68.98328611, 3:69.31582083, 4:68.98328611, 5:69.38942563, 6:69.01487853, 7:69.49657715, 8:69.30893504, 9:69.30893504
+k=5: 0:58.05989089, 1:57.62111322, 2:59.29079420, 3:57.91832846, 4:57.82896276, 5:57.23779203, 6:57.23779203, 7:57.76895452, 8:57.54242990, 9:57.54242990
+k=6: 0:50.04984461, 1:50.12917112, 2:50.05751082, 3:50.16103607, 4:50.11498545, 5:50.10775059, 6:50.19388258, 7:50.40152097, 8:50.01630174, 9:49.93649350
+k=7: 0:44.94418892, 1:44.64726939, 2:44.99990415, 3:44.66957506, 4:44.70256919, 5:44.87365858, 6:44.82455501, 7:44.72707763, 8:45.02146311, 9:45.09621170
+
+Interpretation:
+- Hand inertia <= the minimum across all seeds: deterministic initialization is excellent.
+- Hand inertia inside the sampled distribution: initialization is fine; no action needed.
+- Hand inertia worse than every seed: initialization leaves quality on the table and published assignments are suboptimal.
+
+Silhouette-selected k (hand-written path): 5
+Silhouette-selected k (best-inertia k-means++ partitions): 6
+CHOSEN_K WOULD CHANGE: YES, from 5 to 6; the k-means++ silhouette gain over k=5 is 0.0117246767 (4.17% relative).
+
+Initialization summary: excellent at k=4; fine at k=5; suboptimal versus every sampled seed at k=3,6,7.
+Published-k finding: at k=5, hand inertia 58.58211706 is inside range (fine) versus the k-means++ range 57.23779203 to 59.29079420.
+Selection finding: k=6 has k-means++ inertia 49.93649350 and silhouette 0.2929472797, so applying the same maximum-silhouette rule to the best-inertia k-means++ partitions would publish k=6, not k=5.
+
+3. PCA (hand-written signs aligned to scikit-learn by component dot product)
+component  variance(hand)  variance(sk)    abs delta    max loading delta  max projection delta
+---------  --------------  --------------  -----------  -----------------  --------------------
+PC1         0.4687696770    0.4687696770    5.551e-17    4.823e-11          1.297e-10
+PC2         0.2471377505    0.2471377505    1.110e-16    3.135e-10          4.590e-10
+
+Explained variance descending (hand/sklearn): True/True
+PCA result: PASS
+
+Thresholds: ARI >= 0.95; silhouette abs delta <= 1e-6; PCA variance/loading/projection max abs delta <= 1e-6.
+Inertia ratio is hand-written / sklearn; values near 1 indicate the same local optimum.
+The k-means++ ARI and inertia-quality findings do not alter the correctness thresholds.
+OVERALL CORRECTNESS: PASS
+INITIALIZATION/SELECTION FINDING: REVIEW - CHOSEN_K changes under the best-inertia k-means++ silhouette comparison.

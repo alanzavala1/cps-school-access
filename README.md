@@ -130,7 +130,10 @@ ACS income / race / poverty and to community areas, and computes selective-enrol
 enrollment-weighted student-body representation. Python (`pandas`, `numpy`) handles the
 multi-source download, the income-vs-race confound check (partial correlation), and a
 dependency-free k-means + PCA that groups community areas on school measures only (not race or
-income).
+income). The hand-written clustering stays the production path; a development-only check
+(`analysis/validate_clustering.py`) validates it against scikit-learn — k-means, silhouette, and
+PCA all match — and records where the deterministic initialization is weaker than k-means++. Scope
+and caveats: [`analysis/COMMUNITY_CLUSTERING.md`](./analysis/COMMUNITY_CLUSTERING.md).
 
 **Travel time — OSRM and OpenTripPlanner.** Straight-line distance overstates access, so real
 travel time from each tract to the selective schools is computed two ways, both run locally in
@@ -165,6 +168,11 @@ Requirements: Docker, Python 3.11+, and Node (for `mapshaper`, run via `npx`).
 python -m venv .venv
 .venv/Scripts/pip install -r requirements.txt                    # Windows
 # source .venv/bin/activate && pip install -r requirements.txt   # macOS / Linux
+
+# Optional: check the hand-written k-means/silhouette/PCA against scikit-learn
+# (writes output/clustering_validation.txt; not part of the production pipeline)
+.venv/Scripts/pip install -r requirements-dev.txt
+.venv/Scripts/python analysis/validate_clustering.py
 
 # 1. start PostGIS
 docker run -d --name chicago-postgis -e POSTGRES_PASSWORD=chicago \

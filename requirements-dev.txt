@@ -1,0 +1,4 @@
+-r requirements.txt
+
+# Independent validation for the hand-written k-means, silhouette, and PCA.
+scikit-learn>=1.3

@@ -16,6 +16,7 @@ analysis/load.sql
 # Internal planning / agent-context notes (kept local, not part of the public repo)
 PROJECT_BRIEF.md
 PROJECT_OVERVIEW.md
+AGENT_CONTEXT.md
 
 # Data — raw downloads & large/generated files (sources are documented in README.md)
 data/raw/
