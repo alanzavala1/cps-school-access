@@ -1,50 +1,86 @@
-# Community Area Clustering
+# Community clustering
 
-This map layer groups Chicago community areas by school/access patterns. It is descriptive only.
+[Back to README](../README.md) · [Metrics and interpretation](FINDINGS.md)
 
-## What the model uses
+The map groups 77 community areas using four school and access measures. The
+groups are descriptive categories, not school-effectiveness estimates, official
+CPS classifications, or admission probabilities.
 
-The clustering uses four community-area inputs, all oriented so higher means more concern:
+## Inputs and preprocessing
 
-- assigned default weakness: median tract `default_index`
-- local school weakness: mean weakness index for high schools physically located in the community area
-- selective access weakness: median tract `access_index`
-- local school supply gap: fewer CPS high schools located in the area
+[`12_community_metrics.sql`](12_community_metrics.sql) aggregates tract and
+school measures to `output/community_metrics.json`.
+[`13_community_groups.py`](13_community_groups.py) requires that SQL export;
+there is no fallback to frontend GeoJSON.
 
-Race, income, and poverty are not clustering inputs. They stay in the panel as context.
-Distance to the nearest strong high school remains a panel metric, but it is not a clustering input because the SAT >= 1010 threshold is mostly selective-enrollment schools in the current data.
+| Model input | Definition |
+| --- | --- |
+| `assigned_default_index` | Median tract `default_index`: weakness across six assigned-school outcomes |
+| `local_school_index` | Mean available-component weakness of high schools physically inside the area, normalized across all high schools |
+| `selective_access_index` | Median tract `access_index`: nearest-selective SAT and straight-line distance to a SAT ≥1250 selective |
+| `local_supply_gap` | `1 - min(local_hs_count, 4) / 4`; counts saturate at four schools |
 
-## Method
+All four inputs are oriented so larger values mean more concern. Missing input
+values are filled with the citywide median for that feature and flagged in the
+output. Features are centered on their median and divided by their interquartile
+range; a zero interquartile range falls back to the larger of the full range and 1.
 
-`analysis/12_community_metrics.sql` builds one row per community area in PostGIS and exports `output/community_metrics.json`.
-`analysis/13_community_groups.py` requires that SQL-exported file. There is intentionally no GeoJSON fallback. It robust-scales the four model inputs, runs deterministic KMeans for k=3 through k=7, saves PCA coordinates for explanation, and writes:
+Race, income, poverty, and routed travel times are not inputs. Distance to a
+school with SAT ≥1010 is available as context but does not enter the model.
+Local school count measures geographic supply, not seats or eligibility.
 
-- `output/community_groups.json`
-- `output/community_groups_diagnostics.json`
-- `output/community_groups_selective_sensitivity.json`
-- `frontend/public/data/community_groups.json`
+## Grouping and outputs
 
-The public map uses k=5. Along the deterministic path this script runs, k=5 has the strongest silhouette score among k=3 through k=7 while keeping the groups interpretable and avoiding tiny singleton groups. That comparison depends on the initialization — see Validation below.
+The implementation uses deterministic farthest-point initialization and Lloyd
+k-means for k=3 through k=7. Among those deterministic runs, k=5 has the highest
+silhouette score. The public map uses the fixed `CHOSEN_K = 5`; it does not
+automatically select a new k on each rebuild. Two PCA coordinates summarize the
+scaled inputs for diagnostics; k-means uses all four features.
 
-Public labels are locked in `analysis/community_group_labels.json`; they are not generated silently from each rebuild.
+Labels, colors, and descriptions come from
+[`community_group_labels.json`](community_group_labels.json). Review that file
+alongside diagnostic group profiles when refreshing inputs: fixed labels do not
+guarantee that a changed dataset gives each group the same interpretation.
+
+| Output | Purpose |
+| --- | --- |
+| `output/community_groups.json` | Assignments, labels, drivers, PCA coordinates, and input flags; also written to `frontend/public/data/` |
+| `output/community_groups_diagnostics.json` | Scaling, imputations, per-k scores, group profiles, and PCA details |
+| `output/community_groups_selective_sensitivity.json` | Comparison after excluding selective schools from local quality and supply |
 
 ## Validation
 
-`analysis/validate_clustering.py` checks the hand-written k-means, silhouette, and PCA against scikit-learn. It is a development-only check: it needs `requirements-dev.txt`, it never runs in the production pipeline, and it does not rewrite any published output. The current report is `output/clustering_validation.txt`.
+Run [`validate_clustering.py`](validate_clustering.py) with `requirements-dev.txt`
+installed; [commands are in the README](../README.md#rebuild-and-validate-the-analysis).
+It writes [`output/clustering_validation.txt`](../output/clustering_validation.txt)
+without changing published group data. The check is separate from `run_all.sh`.
 
-What it confirms:
+The committed report, using scikit-learn 1.9.0, finds identical k-means assignments
+and inertia at k=3–7 when sklearn receives the same starting centroids.
+Silhouette scores agree within floating-point precision; PCA variance ratios,
+loadings, and projections agree within the check's 1e-6 tolerance after signs
+are aligned. The correctness exit status does not test initialization quality.
 
-- **k-means, from the same starting centroids**: sklearn's Lloyd algorithm seeded with the hand-written initial centroids returns identical assignments (ARI = 1.000) and identical inertia at every k from 3 to 7.
-- **Silhouette**: hand-written and sklearn scores of the same labels agree to ~1e-16.
-- **PCA**: explained-variance ratios, loadings, and projected coordinates match sklearn to ~1e-10 once component signs are aligned.
+Across ten seeds with ten k-means++ starts each, deterministic initialization
+matches the best inertia found at k=4, lies within the sampled range at k=5,
+and has worse inertia than every sampled run at k=3, 6, and 7. Comparing the
+best-inertia k-means++ partitions would select k=6 by silhouette: **0.293**, versus
+**0.281** for that comparison's k=5. This is the report's 4.2% relative gain.
+The published deterministic k=5 partition has silhouette **0.268**. These are
+different comparisons; identical-start correctness does not establish an
+optimal partition or cluster count.
 
-What it flags:
+## Sensitivity and limits
 
-- The initialization is deterministic farthest-point, not k-means++. Against the best of 10 sklearn k-means++ runs over 10 seeds, it reaches the best inertia found at k=4, lands inside the sampled range at k=5 (the published k), and is worse than every sampled seed at k=3, 6, and 7.
-- So the silhouette comparison across k is not initialization-neutral. Applying the same maximum-silhouette rule to the best-inertia k-means++ partitions would select **k=6** (silhouette 0.293) over **k=5** (0.268) — a 4.2% relative difference.
+The selective-school sensitivity check substitutes
+`local_nonselective_school_index` and `local_nonselective_hs_count`, retaining
+the selective-access input and k=5. In the committed result, **42 of 77 areas**
+change group. Local nonselective quality requires median imputation for 16 areas.
+This shows that whether local selective schools count as local supply materially
+affects the classification; presence inside an area does not guarantee admission.
 
-The published map still uses k=5. These groups are descriptive, the k=5 labels are hand-reviewed and locked in `analysis/community_group_labels.json`, and the gap is small. Moving to k=6, or to a k-means++ initialization, would be a deliberate re-publish with new labels and a rebuilt frontend data file — not a silent change.
-
-## Limits
-
-These groups are not causal claims, admission odds, school effectiveness estimates, or official CPS categories. Distances are straight-line distances unless a future routing pipeline replaces them.
+Assigned-school and access indices use straight-line distances, while the panel
+also shows routed minutes. Community aggregation hides differences within an
+area. Missing-value imputation, capped school counts, normalization, and fixed
+labels all affect the groups. Interpret the colors with the underlying panel
+metrics and the [coverage limits](FINDINGS.md#coverage-and-limits).

@@ -1,52 +1,103 @@
-# Data Inventory & Coverage Audit
+# Data sources and fields
 
-A field-by-field record of what's pulled, what the analysis uses, what's available but
-unused, and the data traps worth knowing about. The analysis is deliberately lean — it
-leads on SAT and a small composite — so this is the menu, not a list of everything in play.
+[Back to README](../README.md) · [Rebuild the data](../docs/DATA_PIPELINE.md)
 
-## ⚠️ Dataset trap (applies to all of twrw-chuq)
-Every `*_avg`, `*_avg_pct`, and `*_cps_pct` column is a **broken placeholder** — the same
-district-wide value repeated for every school (e.g. `student_attendance_avg_pct`=88.3,
-`teacher_attendance_avg_pct`=94, `sat_grade_11_score_cps_avg`, all `graduation_*_cps_pct`).
-**Always use the `*_school` / `*_year_N` per-school variants, and check the distinct count
-before trusting any column.** `_year_2` = current year, `_year_1` = prior (verified).
+The committed map combines CPS SY2024–25 school records, tract estimates from
+ACS 2020–24, and precomputed travel times. Counts below describe the committed
+snapshot; new downloads may change source coverage.
 
-## In hand and used
-- `sat_grade_11_score_school` (lead quality metric), `student_attendance_year_2` (real
-  attendance), `chronic_truancy_pct`, school lat/long, type/category.
-- Tract geometry (TIGER 2020), ACS B19013 income, ACS B03002 race, ACS B17001 poverty,
-  HS attendance boundaries, community areas.
+## Sources
 
-## In hand, real, but unused — extra outcome measures
-All near-complete for the 45 default neighborhood schools (coverage shown out of 45).
-These are candidates to enrich the composite quality index or serve as alternative quality
-lenses:
+[`01_download.py`](01_download.py) saves school, boundary, tract, and ACS
+downloads under `data/raw/`. Nonempty files are reused unless `--force` is passed.
 
-| Field (`*_school` / `*_year`) | Cov (45) | What it is | Notes |
-|---|---|---|---|
-| `graduation_4_year_school` | 45/45 | 4-yr graduation rate | top downstream outcome |
-| `freshmen_on_track_school` | 45/45 | Freshman OnTrack | CPS's signature leading indicator of graduation |
-| `college_enrollment_school` | 45/45 | % enrolling in college | strong downstream outcome |
-| `one_year_dropout_rate_year` | 45/45 | dropout rate | direct, inverse-quality |
-| `mobility_rate_pct` | 45/45 | student mobility/instability | context, not pure quality |
-| `college_persistence_school` | 44/45 | % persisting in college | downstream outcome |
-| `school_survey_safety` + other 5Essentials | ~mostly | climate survey ratings | softer signal, mixed coverage |
+| Data | Source used by the code | Local file or consumer |
+| --- | --- | --- |
+| CPS School Progress Reports SY2425 | [Chicago Data Portal, `twrw-chuq`](https://data.cityofchicago.org/resource/twrw-chuq.json) | `data/raw/progress_sy2425.json` |
+| CPS School Profile SY2425 | [Chicago Data Portal, `3dhs-m3w4`](https://data.cityofchicago.org/resource/3dhs-m3w4.json) | `data/raw/school_demographics_sy2425.json` |
+| High school attendance boundaries | [Chicago Data Portal, `4kfz-zr3a`](https://data.cityofchicago.org/resource/4kfz-zr3a.geojson) | `data/raw/hs_attendance_boundaries.geojson` |
+| Community areas | [Chicago Data Portal, `igwz-8jzy`](https://data.cityofchicago.org/resource/igwz-8jzy.geojson) | `data/raw/community_areas.geojson` |
+| Cook County tract geometry and internal points | [Census TIGERweb tract layer](https://tigerweb.geo.census.gov/arcgis/rest/services/TIGERweb/Tracts_Blocks/MapServer/0) | `data/raw/tiger_tracts_2020.geojson` |
+| Median household income | [Census Reporter, `acs2024_5yr`](https://api.censusreporter.org/1.0/data/show/acs2024_5yr?table_ids=B19013&geo_ids=140%7C05000US17031), table `B19013` | `data/raw/acs_b19013_cook.json` |
+| Race, ethnicity, and poverty | Same Census Reporter release, tables `B03002` and `B17001` | `data/raw/acs_demographics_cook.json` |
+| CTA stops, routes, and schedules | [CTA GTFS feed](https://www.transitchicago.com/downloads/sch_data/google_transit.zip) | `data/otp/cta.gtfs.zip`; OTP and [`17_cta_rail.py`](17_cta_rail.py) |
+| Road and walking network | [BBBike Chicago OpenStreetMap extract](https://download.bbbike.org/osm/bbbike/Chicago/Chicago.osm.pbf) | `data/osrm/chicago.osm.pbf`; OSRM and OTP |
 
-These outcomes are mutually correlated (a school strong on SAT is usually strong on
-graduation / OnTrack), so adding them tightens the composite but doesn't tell a new story.
-The analysis leaves them out to keep the quality measure simple and legible.
+Downloads require no API keys. The ACS release slug and expected release name
+are checked explicitly. The TIGERweb service URL, Socrata records, CTA feed, and
+OSM extract are not archived or version-pinned by the downloader. The tract
+filename describes the intended 2020 geography; the live service response is not
+checked for that vintage. Retain raw inputs for repeatable rebuilds.
 
-## Available but not pulled
-| Dataset | ID | Why it might matter |
-|---|---|---|
-| School Admissions | `rvbr-fi8c` | selective / program types — deeper detail on the selective-enrollment picture |
-| Selective seat / offer / facility capacity | (no current bulk source found) | a real capacity-vs-need analysis would need actual seat counts; CPS doesn't publish them as a current bulk file, and enrollment is not the same as capacity |
-| External school ratings | Illinois Report Card / CPS SQRP | an independent benchmark to validate the SAT-based quality index against |
+## School fields
 
-## Notes on what's deliberately left out
-- **Official CPS selective-enrollment tiers** aren't published as a current bulk tract
-  dataset (only an address-by-address lookup), so where tiers are referenced the project
-  uses an ACS-income proxy and labels it as such. See `analysis/FINDINGS.md`.
-- **A capacity-vs-need ("policy lever") analysis** is out of scope here: it needs actual
-  selective seat counts, which aren't available as open data, and proxying capacity with
-  enrollment would be too rough to report honestly.
+[`02_load.py`](02_load.py) joins progress reports and school profiles by
+`school_id`. It loads all 649 progress-report schools and marks the 170 rows with
+`primary_category = 'HS'` as high schools. The frontend exports that category;
+it does not include every school that might serve an individual high school grade.
+
+| Source field | Loaded/exported field | Use |
+| --- | --- | --- |
+| `sat_grade_11_score_school` | `sat_g11` | SAT comparisons, access thresholds, and school indices; zero becomes null |
+| `student_attendance_year_2` | `attendance_pct` / `attendance` | Current per-school attendance; assigned and local indices |
+| `student_attendance_year_1` | `attendance_prior` | Loaded for reference; not exported to the map |
+| `chronic_truancy_pct` | `truancy_pct` / `truancy` | Outcome panels and school indices; higher values mean more concern |
+| `graduation_4_year_school` | `grad_4yr` | Outcome panels and school indices |
+| `college_enrollment_school` | `college_enroll` | Outcome panels and school indices |
+| `freshmen_on_track_school` | `freshman_ontrack` | Outcome panels and school indices |
+| School latitude, longitude, address, type, and names | Point geometry and profile fields | Spatial joins, pins, and school cards |
+| `student_count_total`, `student_count_low_income`, and racial/ethnic student counts | Enrollment and composition | School cards and enrollment-weighted representation comparisons |
+
+SAT is available for 150 of 170 high schools; attendance for 167. All 45 assigned
+schools in the exported tract layer have SAT, attendance, and truancy values.
+Missing values remain null in the map; available components are averaged when
+building the composite indices.
+
+Use per-school fields when interpreting the progress reports. In the cached
+source, `student_attendance_avg_pct` repeats the district value 88.3 and
+`teacher_attendance_avg_pct` repeats 94 wherever populated. District comparison
+fields such as `sat_grade_11_score_cps_avg` are not per-school outcomes. The
+loader uses `student_attendance_year_2`, not `student_attendance_avg_pct`.
+Dropout, mobility, college persistence, and school survey fields are not loaded.
+
+## Tracts, assignment, and demographics
+
+- Tract GEOIDs join TIGER geometry to ACS records. Census Reporter prefixes are
+  removed to retain the standard 11-digit GEOID. The cached Cook County inputs
+  contain 1,332 tract geometries and matching income records.
+- A Census internal point locates each tract within an attendance boundary and
+  community area. This assigns a whole tract to one school even when its polygon
+  crosses a boundary. The exported map has 791 tracts with an assigned-school SAT.
+- Income is the tract median from `B19013`, not an individual student's income.
+  The loader retains its margin of error but does not use it in calculations.
+  Income is present for 773 of the 791 exported tracts.
+- `B03002` supplies non-Hispanic white share, Black share, and Hispanic share;
+  `B17001` supplies the share below poverty among people with a poverty status.
+  Race and poverty values are present for 789 exported tracts. These categories
+  are not a complete, mutually exclusive population partition.
+- SQL stores demographic shares as fractions and exports percentages to the map.
+  Community summaries use unweighted tract means or medians, as described in
+  [findings and methods](FINDINGS.md#how-the-map-summarizes-an-area).
+
+[`05_proxy_tiers.sql`](05_proxy_tiers.sql) groups the 773 assigned tracts with
+income into quartiles. These are income proxies, not official CPS tiers or
+admissions categories, and they are not shown on the map. Official tier scores,
+origin-level applications, offers, admission probabilities, and seat capacity
+are not inputs to this analysis.
+
+## Routing exports
+
+Each committed routing CSV has 8,701 rows: 791 origins × 11 selective schools.
+Blank durations represent missing routes rather than zero-minute trips.
+
+| File in `output/` | Contents |
+| --- | --- |
+| `driving_times_selective.csv` | Tract and school identifiers, school SAT, road-network minutes and miles |
+| `transit_times_selective.csv` | Same origin/destination pairs, with median morning CTA minutes |
+| `driving_access.json`, `transit_access.json` | Per-tract access summaries and method metadata |
+| `routes.geojson` | Precomputed assigned-school driving and selective-school driving/CTA paths |
+| `cta_rail_lines.geojson`, `cta_rail_stations.geojson`, `cta_bus_lines.geojson` | GTFS-derived visual context layers |
+
+See [travel-time definitions](FINDINGS.md#travel-time-definitions) for destination
+selection and timing, and the [pipeline guide](../docs/DATA_PIPELINE.md#refresh-routing-and-cta-layers)
+for regeneration. Neither live routing nor live service status is used by the map.

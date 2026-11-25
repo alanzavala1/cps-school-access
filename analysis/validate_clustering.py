@@ -265,7 +265,7 @@ def build_report() -> tuple[str, bool]:
     suboptimal_k_text = ",".join(str(k) for k in suboptimal_ks) or "none"
 
     lines = [
-        "Chicago School Gap: hand-written clustering validation",
+        "CPS School Access: hand-written clustering validation",
         "=" * 55,
         f"Input: {len(communities)} community areas x {points.shape[1]} features",
         f"Reference: scikit-learn {sklearn.__version__}",

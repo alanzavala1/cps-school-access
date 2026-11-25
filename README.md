@@ -1,232 +1,105 @@
-# Chicago School Gap
+# CPS School Access
 
-An interactive map that shows how a Chicago student's public high school options depend on where
-they live: the high school they're assigned by home address, how it compares to others across the
-city, and how far the strongest schools are — by car and by public transit.
+CPS School Access maps public high school assignments, school outcomes, and
+travel to selective-enrollment schools across Chicago. It combines Chicago
+Public Schools (CPS) school-year 2024–25 data with ACS 2020–24 estimates.
 
-**Live demo:** [chicago-school-gap.vercel.app](https://chicago-school-gap.vercel.app) · **Numbers, methods, and limits:** [`analysis/FINDINGS.md`](./analysis/FINDINGS.md)
+**[Live map](https://chicago-school-gap.vercel.app)** ·
+[Findings and methods](analysis/FINDINGS.md)
 
-![Chicago's 77 community areas grouped by school access and quality, with all CPS high schools shown as pins](docs/demo2.png)
+![Chicago community areas grouped by school outcomes and access, with selective-enrollment school pins](docs/demo2.png)
 
-It's built entirely on public data and is **descriptive** — it measures assignment, school
-outcomes, access, and student-body composition. It does not make causal claims and does not
-estimate anyone's odds of admission (origin-level admissions data isn't public).
+- Explore 77 community areas grouped by assigned-school outcomes, local school
+  outcomes, school counts, and selective-school access.
+- Click an area to compare schools located there with citywide medians, inspect
+  assigned schools, and view demographic context.
+- Compare driving and CTA travel times to selective schools, with precomputed
+  routes from each tract's Census internal point.
+- Inspect profiles for 170 CPS high schools. Selective schools appear at all zoom
+  levels; other school pins appear when zoomed in. Toggle CTA rail and bus layers
+  for transit context.
 
----
+The results describe geographic access and enrolled students' outcomes. They do
+not measure school effectiveness or admission odds. Tract assignments approximate
+attendance boundaries; this is not an address-level school locator. The map is
+best viewed on a desktop browser. See [coverage and limits](analysis/FINDINGS.md#coverage-and-limits).
 
-## Why I built it
+## Architecture
 
-I'm a recent computer science graduate, and I built this to take a real, messy public-data
-problem from end to end: sourcing and joining several datasets geospatially, writing a
-reproducible analysis pipeline, computing real travel times, and turning all of it into something
-interactive that a non-technical person can read. Chicago high school access is a concrete topic
-with good open data, real stakes, and enough complexity (spatial joins, multiple data sources,
-routing) to be worth doing carefully.
+**Python and PostGIS prepare the data; React, TypeScript, and MapLibre render it.**
+OSRM calculates driving times, and OpenTripPlanner calculates CTA trips using
+street data and transit schedules. The pipeline exports GeoJSON and JSON to
+`output/` and `frontend/public/data/`.
 
----
+The frontend serves the committed files without an application backend. School
+metrics and routes are computed before deployment. The browser also requests a
+CARTO basemap and uses OpenStreetMap Nominatim to label clicked locations, so the
+map requires network access.
 
-## Background
+| Location | Responsibility |
+| --- | --- |
+| `analysis/` | Downloads, spatial SQL, routing, clustering, and validation |
+| `data/` | Local raw downloads and routing graphs; excluded from Git |
+| `output/` | Committed analysis exports and routing matrices |
+| `frontend/src/` | Data loading and selection in `App.tsx`, rendering in `components/MapView.tsx`, panels in `components/InfoPanel.tsx` |
+| `frontend/public/data/` | Static data served by the map |
 
-A bit of context, since the system is specific to Chicago:
+## Run locally
 
-- **Every Chicago address is zoned to one default "neighborhood" high school** by an attendance
-  boundary. That's the school a student gets automatically.
-- **The main alternative is a selective-enrollment high school** — test-in schools that admit
-  students citywide rather than by address, and that generally post much higher outcomes. There
-  are 11 of them among ~170 CPS high schools.
-- **CPS uses a "tier" system to balance selective access.** Each address's census tract is scored
-  on socioeconomic factors into four tiers, and 70% of selective seats are split evenly across the
-  tiers (the rest by citywide rank) — an explicit attempt to keep access from concentrating in
-  wealthier areas ([CPS selection process](https://www.cps.edu/gocps/high-school/results/selective-enrollment/)).
-- Independent research has found selective schools still skew wealthier and whiter than the
-  district ([UChicago Consortium](https://consortium.uchicago.edu/news-item/can-selective-enrollment-in-Chicago-Public-Schools-be-fairer)),
-  and CPS's own [Annual Regional Analysis](https://www.cps.edu/about/district-data/metrics/annual-regional-analysis-information/)
-  (with Kids First Chicago) documents that program supply is geographically uneven.
+Requires **Node.js 22+ and npm**. Python, Docker, and API keys are not needed to
+view the committed map.
 
-This project measures and maps those patterns from scratch with open data, and adds a piece the
-existing reports don't: **real car and CTA travel times** to selective schools, neighborhood by
-neighborhood.
-
----
-
-## What the map shows
-
-- **A choropleth of Chicago's 77 community areas**, grouped by school access and quality
-  (toggleable on/off).
-- **All 170 CPS high schools as pins**, with selective-enrollment schools styled distinctly.
-- **Click any neighborhood** for a panel with its assigned school, the schools located there
-  (vs. the citywide median), demographics as context, and travel time to the nearest selective
-  school by car and by CTA — and the map draws the actual driving and transit routes, labeled
-  with their times.
-- **CTA context layers** — the 'L' rail lines (in their official colors) with stations, and the
-  bus network — to show how the transit network itself shapes access.
-
-Best viewed on a desktop browser.
-
-![Clicking a neighborhood opens a panel with its assigned school, how local schools compare to the city, the group it falls in, and travel time to selective schools by car vs. CTA](docs/demo4.png)
-*Clicking a neighborhood: its assigned school, local-school outcomes vs. the city, its group, and travel time to selective schools by car vs. CTA.*
-
-![Driving and CTA transit routes drawn to the nearest selective school, labeled with real times](docs/demo3.png)
-*The routes drawn on click — assigned school, plus driving and CTA transit to the nearest selective — labeled with real times (here 2 min to the assigned school, 7 by car, 29 by CTA).*
-
-![The CTA L and bus network shown as toggleable context layers](docs/demo1.png)
-*The CTA 'L' and bus layers, toggled on — the rail network thins out toward the South and Southwest, where transit trips to selective schools run longest.*
-
----
-
-## What the data shows
-
-One school year, cross-sectional (CPS SY2024–25 + ACS 2020–24 5-year), across 791 assigned
-census tracts. Full detail in [`analysis/FINDINGS.md`](./analysis/FINDINGS.md). Descriptive only.
-
-**1 — A neighborhood's assigned-school quality tracks its racial makeup more than its income.**
-Tract median income correlates with assigned-school SAT (r = 0.38), but that correlation
-collapses to about −0.07 after controlling for poverty and racial composition. The strongest
-single predictor is share Black (r = −0.52); share Hispanic is near zero. Income and race are
-heavily collinear in Chicago, so the relationship reads as segregation rather than income alone.
-
-**2 — Selective enrollment doesn't close the gap.** Enrollment-weighted against the district,
-selective schools under-represent low-income (ratio 0.66), Black (0.79), and Hispanic (0.67)
-students, and over-represent white students (2.36×).
-
-**3 — The access gap is moderate by car but large by transit.** To the nearest top-tier selective
-(SAT ≥ 1250), the best- vs. worst-access quartile gap is ~1.6× by car but ~3.1× by CTA, and a
-transit trip runs about 3.3–3.7× longer than driving (median transit time to a top selective is
-35 minutes, ranging 4–107). By transit the disadvantage isn't one group's: longer trips track
-share Black (+0.24) and share Hispanic (+0.27) at similar size, the strongest single thread is
-white / higher-income *advantage* (share white −0.41, income −0.36), and the very longest trips
-are in geographically isolated edge neighborhoods (e.g., Mount Greenwood, Riverdale, Hegewisch).
-
----
-
-## Data sources
-
-All public and keyless. CPS data is from the Chicago open-data portal (Socrata); ACS estimates
-come from the keyless Census Reporter API (the official Census API now requires a key); tract
-geometry is from Census TIGER; transit and street data are open feeds.
-
-| Data | Source | Provides |
-|---|---|---|
-| CPS School Progress Reports SY2425 | Socrata `twrw-chuq` | SAT, graduation, attendance, truancy, type, lat/long |
-| CPS School Profile SY2425 | Socrata `3dhs-m3w4` | enrollment + race / low-income composition |
-| HS attendance boundaries SY2425 | Socrata `4kfz-zr3a` | neighborhood-school assignment polygons |
-| Community areas | Socrata `igwz-8jzy` | the 77 community-area polygons |
-| Census tracts (2020) | Census TIGERweb | tract geometry + internal points |
-| ACS 2020–24 5-year | Census Reporter (`B19013`, `B03002`, `B17001`) | median income, race, poverty by tract |
-| CTA schedules | CTA GTFS feed | bus/rail routes, stops, timetables (transit routing) |
-| Street network | OpenStreetMap (BBBike Chicago extract) | road + pedestrian network (driving + walk routing) |
-
-A field-by-field inventory — what's used, what's available but unused, and known data traps — is
-in [`analysis/DATA_INVENTORY.md`](./analysis/DATA_INVENTORY.md).
-
----
-
-## How it's built
-
-**Analysis — PostgreSQL + PostGIS, Python.** The analysis runs in a PostGIS container. Spatial SQL
-(`ST_Within`, `ST_Distance`, `ST_DWithin`, spatial joins) assigns each tract to its neighborhood
-high school via its Census internal point and the attendance-boundary polygons, joins tracts to
-ACS income / race / poverty and to community areas, and computes selective-enrollment access and
-enrollment-weighted student-body representation. Python (`pandas`, `numpy`) handles the
-multi-source download, the income-vs-race confound check (partial correlation), and a
-dependency-free k-means + PCA that groups community areas on school measures only (not race or
-income). The hand-written clustering stays the production path; a development-only check
-(`analysis/validate_clustering.py`) validates it against scikit-learn — k-means, silhouette, and
-PCA all match — and records where the deterministic initialization is weaker than k-means++. Scope
-and caveats: [`analysis/COMMUNITY_CLUSTERING.md`](./analysis/COMMUNITY_CLUSTERING.md).
-
-**Travel time — OSRM and OpenTripPlanner.** Straight-line distance overstates access, so real
-travel time from each tract to the selective schools is computed two ways, both run locally in
-Docker: **OSRM** on the OpenStreetMap extract for road-network driving, and **OpenTripPlanner**
-on the CTA GTFS feed for door-to-door transit (walk + bus/rail + transfers, median across a
-weekday 7–8 AM departure window). The route paths drawn on click are precomputed from the same
-engines.
-
-**Frontend — React + TypeScript + MapLibre GL JS.** A Vite single-page app renders static GeoJSON
-on a CARTO basemap via `react-map-gl` / MapLibre. Clicked-point reverse geocoding uses the keyless
-OSM Nominatim API.
-
-**Architecture.** The database and routing engines are **build-time tools only**. Their results
-are exported to static GeoJSON/CSV, and the frontend serves those files directly — no backend at
-runtime, so the app deploys as a static site.
-
-```
-build-time (local)                              runtime (static host)
-  PostGIS ─┐
-  OSRM    ─┼─ Python/SQL pipeline ─► output/*.geojson, *.csv ─► React app serves static files
-  OTP     ─┘                          frontend/public/data/
+```sh
+git clone https://github.com/alanzavala1/cps-school-access.git
+cd cps-school-access/frontend
+npm ci
+npm run dev
 ```
 
----
+Open the local URL printed by Vite, normally **http://localhost:5173**.
 
-## Reproducing it
+From `frontend/`, check TypeScript and build the production site:
 
-Requirements: Docker, Python 3.11+, and Node (for `mapshaper`, run via `npx`).
+```sh
+npm run build
+npm run preview
+```
 
-```bash
-# 0. Python deps in a project virtualenv
+`npm run preview` serves the build locally, normally on port 4173. For static
+hosting, use `frontend/` as the project root, `npm ci && npm run build` as the
+build command, and `dist/` as the publish directory. Vite uses relative asset
+paths through `base: "./"`.
+
+## Rebuild and validate the analysis
+
+Rebuilding requires **Python 3.11+, Docker, Bash, curl, Node.js, and npm**.
+Follow the [data pipeline guide](docs/DATA_PIPELINE.md) for database setup, stage
+order, routing refreshes, and recovery instructions.
+
+The clustering check compares the production implementation with scikit-learn.
+Run from the repository root in PowerShell:
+
+```powershell
 python -m venv .venv
-.venv/Scripts/pip install -r requirements.txt                    # Windows
-# source .venv/bin/activate && pip install -r requirements.txt   # macOS / Linux
-
-# Optional: check the hand-written k-means/silhouette/PCA against scikit-learn
-# (writes output/clustering_validation.txt; not part of the production pipeline)
-.venv/Scripts/pip install -r requirements-dev.txt
-.venv/Scripts/python analysis/validate_clustering.py
-
-# 1. start PostGIS
-docker run -d --name chicago-postgis -e POSTGRES_PASSWORD=chicago \
-  -e POSTGRES_DB=school_gap -p 5433:5432 postgis/postgis:16-3.4
-
-# 2. (optional, for travel time) bring up the routing engines, then build the matrices
-bash analysis/osrm/osrm_up.sh                     # driving  — OSM extract, builds graph, serves :5000
-bash analysis/otp/otp_up.sh                       # transit  — CTA GTFS, builds graph, serves :8080
-.venv/Scripts/python analysis/14_driving_access.py  # driving travel-time matrix
-.venv/Scripts/python analysis/15_transit_access.py  # CTA transit travel-time matrix
-.venv/Scripts/python analysis/18_routes.py          # route geometry for click-to-route
-
-# 3. rebuild the whole pipeline end to end
-PY=.venv/Scripts/python ./analysis/run_all.sh
-
-# 4. run the map
-cd frontend && npm install && npm run dev
+.venv/Scripts/python.exe -m pip install -r requirements-dev.txt
+.venv/Scripts/python.exe analysis/validate_clustering.py
 ```
 
-`run_all.sh` rebuilds every table and export from a clean database. The routing-engine outputs are
-committed, so the rebuild reproduces the map without the engines running; the matrices regenerate
-when the engines are up. The ACS release is pinned so reruns can't silently drift to a new vintage.
+On macOS or Linux, use `.venv/bin/python` for both commands after creating the
+environment. The check writes `output/clustering_validation.txt` and exits with a
+failure status if correctness thresholds fail. Initialization comparisons are
+reported separately. There is no automated browser test suite.
 
----
+## Documentation
 
-## Repository layout
+- [Findings and methods](analysis/FINDINGS.md): definitions, statistical results,
+  routing assumptions, and interpretation limits.
+- [Data sources and fields](analysis/DATA_INVENTORY.md): source identifiers,
+  transformations, coverage, and missing values.
+- [Data pipeline](docs/DATA_PIPELINE.md): rebuilding exports, refreshing routing
+  data, configuration, and troubleshooting.
+- [Community clustering](analysis/COMMUNITY_CLUSTERING.md): model inputs,
+  preprocessing, validation, and sensitivity to local selective schools.
 
-```
-analysis/        download + PostGIS pipeline (numbered stages 01–18), SQL, and method docs
-  osrm/ otp/     Docker bring-up scripts for the routing engines
-  FINDINGS.md    numbers, methods, and honest limits
-  DATA_INVENTORY.md   field-by-field coverage audit
-output/          exported GeoJSON/CSV (the analysis's source of truth)
-frontend/        React + TypeScript + MapLibre app (serves static data from public/data)
-```
-
-Large or regenerable inputs (raw downloads, OSM/GTFS feeds, routing graphs, the generated
-`load.sql`, `node_modules`) are gitignored; the computed outputs the app needs are committed.
-
----
-
-## Limits
-
-- **Descriptive, one year, cross-sectional.** No trends over time, no causal claims, no
-  admission-odds estimates.
-- **Transit is CTA-only** (no Metra or Pace), so transit access is understated where those run;
-  driving times are free-flow (no live traffic).
-- **Routes start at a neighborhood's center point**, not the exact click — matching how the
-  travel-time numbers are computed.
-- **Selective tiers, where referenced, are approximated** from ACS income, not the official CPS
-  tier (which isn't published as a current bulk file); it's labeled as a proxy.
-
----
-
-## Author
-
-[Alan Zavala](https://github.com/alanzavala1)
+Code is available under the [MIT license](LICENSE). Source data retain their
+providers' terms.

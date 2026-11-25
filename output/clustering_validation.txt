@@ -1,4 +1,4 @@
-Chicago School Gap: hand-written clustering validation
+CPS School Access: hand-written clustering validation
 =======================================================
 Input: 77 community areas x 4 features
 Reference: scikit-learn 1.9.0
